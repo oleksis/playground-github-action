@@ -1,0 +1,61 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - "main"
+# Uncommment this to launch the workflow manually.
+  workflow_dispatch:
+
+env:
+  PLAYGROUND_PAT: ${{ secrets.PLAYGROUND_PAT}}
+  PLAYGROUND_APP_NAME: fastapi
+  PLAYGROUND_ACCOUNT_NAME: oleksis
+  TARGET_DOCKER_REGISTRY: oleksis
+  TARGET_DOCKER_IMAGE: fastapi-napptive-playground-py:latest
+
+jobs:
+  test:
+    name: Test Playground CLI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Test Print Token
+        run: echo ${PLAYGROUND_PAT}
+      - name: Get Kubeconfig      
+        uses: napptive-actions/playground-github-action@v4.3.0
+        with:
+          cmd: "get-kubeconfig"
+      - name: Playground List applications
+        uses: napptive-actions/playground-github-action@v4.3.0
+        with:
+          debug: true
+          cmd: "apps"
+      - name: Deploy new version of the application
+        run: |
+          if [[ -z "${PLAYGROUND_PAT}" ]]; then
+            echo "PLAYGROUND_PAT must be set with your Personal Access Token"
+            return 1
+          else
+            echo "PLAYGROUND_PAT is set."
+          fi
+
+          echo "Downloading NAPPTIVE Playground CLI"
+          curl -O https://storage.googleapis.com/artifacts.playground.napptive.dev/installer.sh && bash installer.sh
+
+          echo "Downloading Kubectl"
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+
+          echo "Login into NAPPTIVE Playground"
+          playground login --pat 
+
+          export PATH=$PATH:$(pwd)
+
+          echo "Forcing rolling update to download newest image"
+          IMAGE="${TARGET_DOCKER_REGISTRY}/${TARGET_DOCKER_IMAGE}"
+          echo "Update image... ${IMAGE}"
+          PATCH="{\"spec\":{\"template\":{\"spec\": {\"containers\": [{\"name\":\"${PLAYGROUND_APP_NAME}-comp\", \"image\":\"${IMAGE}\"}]}}}}"
+          echo $PATCH
+          kubectl --kubeconfig napptive-kubeconfig patch deployment ${PLAYGROUND_APP_NAME}-comp -p "${PATCH}" --type=merge
+          #kubectl --kubeconfig napptive-kubeconfig get deployment fastapi-comp --output yaml
